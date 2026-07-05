@@ -1,0 +1,177 @@
+import streamlit as st
+import pandas as pd
+from pathlib import Path
+from datetime import date
+
+st.set_page_config(page_title="Workout Tracker", page_icon="💪", layout="wide")
+
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
+LOG_FILE = DATA_DIR / "workout_log.csv"
+
+routine = {
+    "Upper A": [
+        ("Smith incline bench press", "3 x 6-10"),
+        ("Lat pulldown", "3 x 8-12"),
+        ("Seated cable row", "3 x 8-12"),
+        ("Dumbbell lateral raise", "4 x 12-20"),
+        ("Pec deck", "2 x 10-15"),
+        ("Rope pushdown", "2 x 10-15"),
+        ("Incline dumbbell curl", "2 x 10-15"),
+    ],
+    "Lower A": [
+        ("Leg press", "4 x 8-12"),
+        ("Smith Romanian deadlift", "3 x 8-12"),
+        ("Seated leg curl", "3 x 10-15"),
+        ("Leg extension", "3 x 12-15"),
+        ("Standing calf raise", "4 x 12-20"),
+        ("Cable crunch", "3 x 12-20"),
+    ],
+    "Upper B": [
+        ("Flat dumbbell press", "3 x 8-12"),
+        ("Assisted pull-up or pulldown", "3 x 8-12"),
+        ("Chest-supported row", "3 x 8-12"),
+        ("Machine shoulder press", "3 x 8-12"),
+        ("Cable lateral raise", "4 x 12-20"),
+        ("Reverse pec deck", "3 x 12-20"),
+        ("Overhead cable triceps extension", "2 x 10-15"),
+        ("Hammer curl", "2 x 10-15"),
+    ],
+    "Lower B": [
+        ("Smith squat or goblet squat", "3 x 8-12"),
+        ("Leg press", "3 x 10-15"),
+        ("Romanian deadlift", "3 x 8-12"),
+        ("Walking lunges or split squats", "2 x 10-12 each leg"),
+        ("Leg curl", "2 x 10-15"),
+        ("Calf raise", "4 x 12-20"),
+        ("Hanging knee raise or cable crunch", "3 x 12-20"),
+    ],
+    "Optional Pump": [
+        ("Cable lateral raise", "3 x 15-20"),
+        ("Pec deck", "3 x 12-15"),
+        ("Lat pulldown", "3 x 10-12"),
+        ("Rope pushdown", "2 x 12-15"),
+        ("Cable curl", "2 x 12-15"),
+    ],
+}
+
+def load_log():
+    if LOG_FILE.exists():
+        df = pd.read_csv(LOG_FILE)
+        for col in ["date", "week", "day", "exercise", "set_no", "weight", "reps", "rir", "notes"]:
+            if col not in df.columns:
+                df[col] = ""
+        return df
+    return pd.DataFrame(columns=["date", "week", "day", "exercise", "set_no", "weight", "reps", "rir", "notes"])
+
+def save_log(df):
+    df.to_csv(LOG_FILE, index=False)
+
+def last_for_exercise(df, exercise):
+    if df.empty:
+        return pd.DataFrame()
+    x = df[df["exercise"] == exercise].copy()
+    if x.empty:
+        return x
+    x["date"] = pd.to_datetime(x["date"], errors="coerce")
+    x = x.sort_values(["date", "week", "set_no"], ascending=[False, False, True])
+    return x
+
+st.markdown("""
+<style>
+.block-container {padding-top: 1rem; padding-bottom: 2rem; max-width: 1100px;}
+div[data-testid="stForm"] {border: 1px solid #2a2a2a; padding: 1rem; border-radius: 18px;}
+.stButton button {width: 100%; border-radius: 14px; padding: 0.75rem 1rem; font-weight: 600;}
+</style>
+""", unsafe_allow_html=True)
+
+if "selected_day" not in st.session_state:
+    st.session_state.selected_day = "Upper A"
+if "selected_week" not in st.session_state:
+    st.session_state.selected_week = 1
+if "workout_date" not in st.session_state:
+    st.session_state.workout_date = date.today()
+
+st.title("💪 Workout Tracker")
+st.caption("Phone-friendly tracker for your Planet Fitness hypertrophy plan.")
+
+log = load_log()
+
+with st.sidebar:
+    st.header("Workout")
+    st.session_state.selected_week = st.slider("Week", 1, 8, st.session_state.selected_week)
+    st.session_state.selected_day = st.selectbox("Day", list(routine.keys()), index=list(routine.keys()).index(st.session_state.selected_day))
+    st.session_state.workout_date = st.date_input("Date", value=st.session_state.workout_date)
+
+day = st.session_state.selected_day
+week = st.session_state.selected_week
+workout_date = st.session_state.workout_date
+
+st.subheader(f"{day} — Week {week}")
+
+with st.form("log_form", clear_on_submit=False):
+    form_rows = []
+    for i, (exercise, scheme) in enumerate(routine[day], start=1):
+        last = last_for_exercise(log, exercise)
+        last_weight = pd.to_numeric(last["weight"], errors="coerce").dropna().iloc[0] if not last.empty and pd.to_numeric(last["weight"], errors="coerce").dropna().size > 0 else pd.NA
+        last_reps = pd.to_numeric(last["reps"], errors="coerce").dropna().tolist()
+        top_reps = max(last_reps) if last_reps else None
+
+        st.markdown(f"### {i}. {exercise}")
+        st.caption(f"Target: {scheme}")
+        if pd.notna(last_weight):
+            if top_reps is not None:
+                st.caption(f"Last: {last_weight:.1f} lb for up to {top_reps} reps. If you hit the top of the range, add the smallest weight jump next time.")
+            else:
+                st.caption(f"Last: {last_weight:.1f} lb")
+        else:
+            st.caption("No history yet. Start conservatively.")
+
+        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1, 2])
+        with c1:
+            weight = st.number_input(f"Weight##{day}_{i}", min_value=0.0, step=2.5, value=float(last_weight) if pd.notna(last_weight) else 0.0, key=f"w_{day}_{i}")
+        with c2:
+            reps = st.number_input(f"Reps##{day}_{i}", min_value=0, step=1, value=int(last["reps"].iloc[0]) if not last.empty and str(last["reps"].iloc[0]).isdigit() else 0, key=f"r_{day}_{i}")
+        with c3:
+            rir = st.selectbox(f"RIR##{day}_{i}", [0, 1, 2, 3, 4, 5], index=2, key=f"rir_{day}_{i}")
+        with c4:
+            notes = st.text_input(f"Notes##{day}_{i}", placeholder="Optional", key=f"n_{day}_{i}")
+
+        form_rows.append({
+            "date": str(workout_date),
+            "week": week,
+            "day": day,
+            "exercise": exercise,
+            "set_no": 1,
+            "weight": weight,
+            "reps": reps,
+            "rir": rir,
+            "notes": notes,
+        })
+
+    submitted = st.form_submit_button("Save workout")
+
+if submitted:
+    rows = [r for r in form_rows if r["weight"] > 0 and r["reps"] > 0]
+    if rows:
+        updated = pd.concat([log, pd.DataFrame(rows)], ignore_index=True)
+        save_log(updated)
+        st.success("Workout saved.")
+        st.rerun()
+    else:
+        st.warning("Enter at least one valid set before saving.")
+
+st.divider()
+st.subheader("Progress")
+if not log.empty:
+    ex = st.selectbox("Exercise", sorted(log["exercise"].dropna().unique()))
+    hist = log[log["exercise"] == ex].copy()
+    hist["date"] = pd.to_datetime(hist["date"], errors="coerce")
+    hist = hist.sort_values("date")
+    st.dataframe(hist[["date", "week", "day", "weight", "reps", "rir", "notes"]], use_container_width=True, hide_index=True)
+    chart_df = hist.groupby("date", as_index=False).agg(weight=("weight", "max"), reps=("reps", "max"))
+    st.line_chart(chart_df.set_index("date")[["weight"]])
+    st.line_chart(chart_df.set_index("date")[["reps"]])
+    st.download_button("Download CSV", data=log.to_csv(index=False).encode("utf-8"), file_name="workout_log.csv", mime="text/csv")
+else:
+    st.info("No workouts logged yet.")
